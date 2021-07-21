@@ -1,8 +1,10 @@
+#written for R-4.0.2
 
 
-setwd("C:/Users/rbuch/OneDrive/R projects/GRA transport/home")
+#set directory
+setwd()
 
-
+#####version control
 #checkpointRemove("2020-03-11")
 #checkpoint("2020-07-01")
 
