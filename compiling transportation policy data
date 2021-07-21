@@ -1,0 +1,2027 @@
+
+
+setwd("C:/Users/rbuch/OneDrive/R projects/GRA transport/home")
+
+
+#checkpointRemove("2020-03-11")
+#checkpoint("2020-07-01")
+
+#running this is a good idea when not using R Open (it takes care of package versions).
+    #library(checkpoint)
+    #checkpoint("2020-07-01", scanForPackages = FALSE)
+    #setSnapshot("2020-07-01")
+
+
+#checkpointArchives()
+#getValidSnapshots()
+
+
+options(max.print = 2000)
+
+#run time (start) ----
+start.time <- Sys.time()
+start.time
+
+#install.packages("pacman") #has p_load function that checks to see if a package is installed, if not it attempts to install the package and then loads it.
+###install.packages("librarian")  #this is a more complicated version of pacman with more advanced options (not used in this script).
+
+#loads the listed libraries.
+#installs any missing libraries
+pacman::p_load(
+    clubSandwich,  #for coef_test function.
+    plm, 
+    stringr, #for dealing with regular expressions
+    readr, #read csv's (faster than built in read.csv function)
+    readxl,
+    plyr, #count
+    dplyr, #group_by
+    data.table,  #setnames function  
+    reshape2, #melt function
+    quantmod, #gets info from FRED (like inflation numbers)
+    openintro, #for state conversion function  abbr2state, state2abbr
+    imputeTS, #na.interpolation function
+    foreign,
+    readstata13,
+    tidyr, #fill(data, vars)  #df %>% group_by(houseID) %>% fill(price)
+    estimatr, #iv_robust(), lm_robust() #see brief explainer: https://declaredesign.org/r/estimatr/  ; cheat sheet: https://github.com/rstudio/cheatsheets/raw/master/estimatr.pdf
+    lfe#felm() for fitting models with huge numbers of fixed effects
+)
+
+
+#checkpoint location: C:\Users\rbuch\Documents\.checkpoint
+
+#library(RODBC) #for sql databases
+
+#install.packages("RODBC")
+#library(clubSandwich) #for coef_test function.
+#library(plm)
+
+#library(stringr) #for dealing with regular expressions
+#library(readr) #read csv's (faster than built in read.csv function)
+#library(readxl)
+#library(xlsx)
+#library(plyr) #count
+#library(dplyr) #group_by
+
+#ibrary(data.table) #setnames function  
+#library(reshape2) #melt function
+
+#for importing inflation data
+#library(quantmod) #gets info from FRED (like inflation numbers)
+#library(openintro) #for state conversion function  abbr2state, state2abbr
+#abbr2state, state2abbr
+#library(imputeTS) #na.interpolation function
+#library(foreign) 
+#library(readstata13)
+#library(tigris) #census shapefile data.
+
+#https://stackoverflow.com/questions/23340150/replace-missing-values-na-with-most-recent-non-na-by-group
+#library(zoo) #na.locf function for replacing each NA with the most recent non-NA prior to it.
+#library(tidyr)  #fill(data, vars)  #df %>% group_by(houseID) %>% fill(price)
+
+#for more models
+#library(estimatr) #iv_robust(), lm_robust() #see brief explainer: https://declaredesign.org/r/estimatr/  ; cheat sheet: https://github.com/rstudio/cheatsheets/raw/master/estimatr.pdf
+#library(lfe) #felm() for fitting models with huge numbers of fixed effects
+
+#install.packages("tigris")
+
+#library(blscrapeR) #for importing inflation data BLS.
+#about bls series codes: https://www.bls.gov/bls/errata/cpi-price-corrections-10182016.htm
+#my bls api key: c9853cdb306b4f3c9e54a791968cee84
+
+#indicate whether I want the bridge variables to be for all bridges or just NHS bridges. 
+#"1" is for all bridges.
+#"2" is for NHS bridges only.
+all_or_nhs_bridges <- 1
+
+
+path.data <- "F:/Data/"
+path.t <- "F:/Data/Transportation/"
+path.gov <- "F:/Data/State govs/governors/"
+path.leg <- "F:/Data/State govs/state leg partisanship/"
+path.bea <- "F:/Data/BEA/2018/"
+path.hw <- "F:/Data/Transportation/FHWA/"
+
+path.data.out <- "F:/Data/Data exports/"
+
+
+
+#state election data----
+    #Klarner, Carl, 2018, "State Legislative Election Returns, 1967-2016", https://doi.org/10.7910/DVN/3WZFK9, Harvard Dataverse, V3, UNF:6:pV4h1CP/B8pHthjjQThTTw== [fileUNF]
+    #https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/3WZFK9
+
+    #see this about importing very large data:
+        #https://stackoverflow.com/questions/1727772/quickly-reading-very-large-tables-as-dataframes/15058684#15058684
+load(paste0(path.data, "elections/State Legislative Election Returns 1967-2016/elections.RData"))
+leg <- table #378345 rows
+
+
+#convert state abreviations to names or vise versa (for *leg* dataframe)
+#abbr2state, state2abbr
+
+leg <- leg[,1:61]
+leg <- leg[which(leg$etype == "g" | leg$etype == "gs"),]  #takes only general elections and special elections held concurrently with general elections.
+leg$state <- abbr2state(leg$sab)
+
+
+
+
+
+
+
+#votes.dem
+df <- leg[leg$partyt == "d",]
+df <- group_by(df, state, year, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.dem")
+df.main <- df
+
+    df <- leg[leg$partyt == "d",]
+    df <- df %>% group_by(year, state, ddez) %>% slice(which.max(vote))
+    df <- df[,c("year", "state", "ddez", "tenure1", "tenure2")]
+    colnames(df)[4:ncol(df)] <- paste0(colnames(df)[4:ncol(df)], ".dem") 
+    df.main <- full_join(df.main, df) 
+
+
+df <- leg[leg$partyt != "d",]
+df <- group_by(df, state, year, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.nondem")
+df.main <- full_join(df.main, df)
+#df.nondem <- df
+
+df <- leg[leg$partyt == "r",]
+df <- group_by(df, state, year, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.rep")
+df.main <- full_join(df.main, df)
+#df.rep <- df
+
+    df <- leg[leg$partyt == "r",]
+    df <- df %>% group_by(year, state, ddez) %>% slice(which.max(vote))
+    df <- df[,c("year", "state", "ddez", "tenure1", "tenure2")]
+    colnames(df)[4:ncol(df)] <- paste0(colnames(df)[4:ncol(df)], ".rep") 
+    df.main <- full_join(df.main, df) 
+
+df <- leg[leg$partyt != "r",]
+df <- group_by(df, state, year, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.nonrep")
+df.main <- full_join(df.main, df)
+#df.nonrep <- df
+
+
+
+
+df.main$election.year <- 1  #dummy variable indicating an election year
+
+
+
+
+#df <- merge.data.frame(df.dem, df.nondem, by = c('year', 'dist.id'), all = TRUE)
+#df <- merge.data.frame(df, df.rep, by = c('year', 'dist.id'), all = TRUE)
+#df <- merge.data.frame(df, df.nonrep, by = c('year', 'dist.id'), all = TRUE)
+
+df.main[is.na(df.main)] <- 0  #116678, 08-12-2020.
+
+#write_csv(df, "./state_leg_party_vote_totals.csv")
+
+
+
+#df.main <- df.party  #116678, 08-12-2020.
+
+
+
+#eu <- gvisTable(df.main)
+#plot(eu)
+#plot(gvisTable(df.main))
+
+
+#vote totals for win and loose.-----
+
+df <- leg[leg$outcome == "w",]
+df <- group_by(df, year, state, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.winner") #votes_for_winner
+df.win <- df  #116678 rows, 08-11-2020.
+
+    df <- leg[leg$outcome == "w",]
+    df <- df %>% group_by(year, state, ddez) %>% slice(which.max(vote))
+    df <- df[,c("year", "state", "ddez", "sen", "redist", "tenure1", "tenure2", "partyt")]
+    colnames(df)[6:ncol(df)] <- paste0(colnames(df)[6:ncol(df)], ".winner") #112547 rows, 08-11-2020.
+    df.combo <- left_join(df.win, df) #116678 rows
+    
+
+
+df <- leg[leg$outcome != "w",]
+df <- group_by(df, year, state, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.loser") #votes_against_winner
+df.nonwin <- df
+df.combo <- full_join(df.combo, df)  #116678
+
+
+    df <- leg[leg$outcome != "w",]
+    df <- df %>% group_by(year, state, ddez) %>% slice(which.max(vote))
+    df <- df[,c("year", "state", "ddez", "tenure1", "tenure2")]
+    colnames(df)[4:ncol(df)] <- paste0(colnames(df)[4:ncol(df)], ".loser")
+    df.combo <- full_join(df.combo, df) #116678
+    
+
+
+#df[is.na(df)] <- 0
+df.combo$vote.loser[is.na(df.combo$vote.loser)] <- 0
+df.combo$vote.loser[is.na(df.combo$vote.winner)] <- NA
+
+winner_loser_vote_totals <- df.combo
+
+
+df.main <- full_join(df.main, df.combo)
+#df.main <- merge.data.frame(df.main, df, by = c('year', 'state', 'ddez'), all = TRUE)
+
+
+
+
+df <- leg[leg$exper == "inc",]
+df <- group_by(df, year, state, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.inc") #votes_for_winner
+df.inc <- df
+
+df <- leg[leg$exper != "inc",]
+df <- group_by(df, year, state, ddez)
+df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+setnames(df, "vote", "vote.noninc") #votes_for_winner
+df.noninc <- df
+
+#df <- merge.data.frame(df.inc, df.noninc, by = c("year", "state", "ddez"), all = TRUE)
+df <- full_join(df.inc, df.noninc)
+
+
+df$vote.inc[is.na(df$vote.inc)] <- 0
+df$vote.noninc[is.na(df$vote.noninc)] <- 0
+
+#df.main <- merge.data.frame(df.main, df, by = c('year', 'state', 'ddez'), all = TRUE)
+df.main <- left_join(df.main, df)  #174008 rows (should be 116678)
+
+
+#abbr2state, state2abbr
+
+df.main$state.abv <- state2abbr(df.main$state)  #consider deleting this.
+
+#make a unique identifier for each district
+#this is a character value.
+#df.main$dist.id <- paste0(df.main$state.abv, "_", df.main$ddez)  #118471 rows
+
+
+
+
+
+
+
+#make a row for each district-year.
+
+df <- df.main[,c("state", "state.abv", "ddez")]
+df <- unique(df)
+
+#ids <- unique(df.main$dist.id) #length 7544 rows.
+#df <- as.data.frame(ids)
+#colnames(df) <- "dist.id"
+
+start.year <- min(df.main$year)
+#start.year <- 1966
+#end.year <- max(leg$year)
+end.year <- 2020 
+year <- start.year:end.year
+year <- as.data.frame(year) #54 rows
+
+df <- merge.data.frame(df, year, all = TRUE) #407376 rows, 399779 rows with just g and gs election types.  #cross-join.
+
+#year$fake <- 1
+#df$fake <- 1
+#test <- full_join(df, year)
+
+df.main <- left_join(df, df.main) #407376 rows
+
+#test.orig <- merge.data.frame(df, df.main, by = c("state", "state.abv", "ddez", "year"), all = TRUE) #407376 rows
+
+
+
+
+
+
+
+
+
+#aggregate above variables by state-----
+
+if (FALSE) {
+    df <- group_by(df.main, year, state)
+    df$ddez <- NULL
+    df <- summarise_all(df, funs(sum), na.rm = TRUE)
+    df.main <- df
+
+
+
+
+
+
+
+    #incumbent and nonincumbent win totals by state-year, and #vote counts for both----
+    leg$win_count <- 0
+    leg$win_count[leg$outcome == "w"] <- 1 #each election winner gets win_count of 1, all others get win_count of 0.
+
+    df <- leg[leg$exper == "inc",] #take only incumbents
+    df <- group_by(df, year, state)
+    df <- summarise_at(df, "win_count", funs(sum), na.rm = TRUE)
+    setnames(df, "win_count", "win_count.inc")
+    df.inc <- df
+
+    df <- leg[leg$exper != "inc",] #take only nonincumbents
+    df <- group_by(df, year, state)
+    df <- summarise_at(df, "win_count", funs(sum), na.rm = TRUE)
+    setnames(df, "win_count", "win_count.noninc")
+    df.noninc <- df
+
+    df <- merge.data.frame(df.inc, df.noninc, by = c("year", "state"), all = TRUE)
+
+    df[is.na(df)] <- 0
+    #write_csv(df, "./state_leg_incumbent_nonincumbent_wins.csv")
+
+    #incumbent_nonincumbent_wins <- df
+    df.main <- merge.data.frame(df.main, df, by = c('year', 'state'), all = TRUE)
+
+    #vote counts for incumbents and nonincumbents-----
+    df <- leg[leg$exper == "inc",] #take only incumbents
+    df <- group_by(df, year, state)
+    df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+    setnames(df, "vote", "vote.inc")
+    df.inc <- df
+
+    df <- leg[leg$exper != "inc",] #take only nonincumbents
+    df <- group_by(df, year, state)
+    df <- summarise_at(df, "vote", funs(sum), na.rm = TRUE)
+    setnames(df, "vote", "vote.noninc")
+    df.noninc <- df
+
+    df <- merge.data.frame(df.inc, df.noninc, by = c("year", "state"), all = TRUE)
+
+    df.main <- merge.data.frame(df.main, df, by = c('year', 'state'), all = TRUE)
+
+}
+
+
+
+#looking over the leg data.
+if (FALSE) {
+    #how many incumbents win each year
+    plyr::count(leg$tenure1)
+    #outcome #Winner Status of Candidate
+    #prior1 #Service in the Chamber before Dataset Began
+    #prior2 #Service in the Legislature before Dataset Began
+    #tenure1 #Years of Continuous Tenure in Chamber
+    #tenure2 #Years of Continuous Tenure in Legislature
+
+    df <- leg[!is.na(leg$tenure1),]
+    df <- df[df$tenure1 > 0,]
+
+    df$count <- 1
+
+    df <- group_by(df, year)
+    df <- summarise_at(df, "count", funs(sum))
+
+    years <- seq(1968, 2016, by = 2)
+
+    df <- df[df$year %in% years,] #take only years in this sequence.
+    #df <- df[is.element(df$year, years),]  #equivilant to above.
+
+    df.leg <- df
+    plot(df.leg$count, df.leg$year)
+    plot(x = df.leg$year, y = df.leg$count)
+    View(df.leg)
+
+    plot(df)
+}
+
+
+
+#state governors -----
+
+
+#for testing
+#i = 1
+
+#imports all the csv's in this folder and rbinds them together
+files <- list.files(path = path.gov)
+
+tt <- lapply(paste(path.gov, files, sep = ""), read_excel)
+
+#tt <- read_excel(paste(path, files[14], sep = ""))
+
+list <- list()
+
+for (i in 1:length(files)) {
+    a <- which(tt[[i]][, 1] == "Alabama") #row where data starts
+
+    b <- which(tt[[i]][, 1] == "American Samoa") #row where data ends
+    b <- b - 1 #excludes the American Samoa line
+
+    df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+
+    df <- df[!is.na(df[, 1]),] #drop any rows with NAs in the first column.
+
+    #create year variable
+    year <- substr(files[i], 5, 8) #extracts year from the file name.
+    df$year <- year
+
+    #change column names
+    colnames(df)[1] <- "state"
+    colnames(df)[2] <- "name"
+
+    #create party variable
+    df$party <- str_extract_all(df$name, "\\(.*$")
+    df$party <- gsub("\\(", "", df$party)
+    df$party <- gsub("\\)", "", df$party)
+
+    #take only the important columns
+    df <- df[,c("state", "name", "party", "year")]
+
+    list[[i]] <- df
+
+}
+
+df <- do.call(rbind, list)
+
+#get rid of extra letters in a few of the party id rows.
+#the extra letters are all lower case and correspond to footnotes in the original spreadsheets.
+df$party <- gsub("[[:lower:]]", "", df$party)
+df$party <- gsub("[[:space:]]", "", df$party)
+
+#make adjusted party variable where independents (I) are reclassified as either (D) or (R).
+df$party.adj <- df$party
+df$party.adj[df$party.adj == "I"] <- "D"
+df$party.adj[df$party.adj == "DFL"] <- "D"
+
+#change variable names for merging
+#setnames(df, "state", "name.state")
+setnames(df, "name", "name.gov")
+setnames(df, "party", "party.gov.literal")
+setnames(df, "party.adj", "party.gov")
+
+df$year <- as.numeric(df$year)
+
+#df$party.adj.gov.n <- NA
+#df$party.adj.gov.n[df$party.adj.gov == "D"] <- 0
+#df$party.adj.gov.n[df$party.adj.gov == "R"] <- 1
+
+#df.govs <- df #750 rows
+
+#nrow is 750 for df.govs, 407376  for df.main prior to this merge.
+
+#df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all = TRUE) #399779 rows
+df.main <- full_join(df.main, df)  #399779 rows
+
+
+
+
+#state legislatures -----
+#NOTE: the 2018 spreadsheet had a blank chart sheet that I needed to delete so it would load.
+
+
+
+#for testing
+
+
+#imports all the csv's in this folder and rbinds them together
+files <- list.files(path = path.leg)
+
+tt <- lapply(paste(path.leg, files, sep = ""), read_excel)
+
+#tt <- read_excel(paste(path, files[14], sep = ""))
+
+list <- list()
+
+for (i in 1:length(files)) {
+    a <- which(tt[[i]][, 1] == "Alabama") #row where data starts
+
+    b <- which(tt[[i]][, 1] == "American Samoa") #row where data ends
+    b <- b - 1 #excludes the American Samoa line
+
+    df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+
+    df <- df[!is.na(df[, 1]),] #drop any rows with NAs in the first column.
+
+    #create year variable
+    year <- substr(files[i], 5, 8) #extracts year from the file name.
+    df$year <- year
+
+    #change column names
+    colnames(df)[1] <- "state"
+    colnames(df)[2] <- "sdem"
+    colnames(df)[3] <- "srep"
+    colnames(df)[9] <- "hdem"
+    colnames(df)[10] <- "hrep"
+
+    #take only columns I want.
+    df <- df[c("state", "year", "sdem", "srep", "hdem", "hrep")]
+
+    #format data columns to be numeric
+    df$sdem <- gsub("[[:space:]]", "", df$sdem)
+    df$sdem <- gsub("[[:alpha:]]", "", df$sdem)
+    df$sdem <- gsub("[[:punct:]]", "", df$sdem)
+
+    df$srep <- gsub("[[:space:]]", "", df$srep)
+    df$srep <- gsub("[[:alpha:]]", "", df$srep)
+    df$srep <- gsub("[[:punct:]]", "", df$srep)
+
+    df$hdem <- gsub("[[:space:]]", "", df$hdem)
+    df$hdem <- gsub("[[:alpha:]]", "", df$hdem)
+    df$hdem <- gsub("[[:punct:]]", "", df$hdem)
+
+    df$hrep <- gsub("[[:space:]]", "", df$hrep)
+    df$hrep <- gsub("[[:alpha:]]", "", df$hrep)
+    df$hrep <- gsub("[[:punct:]]", "", df$hrep)
+
+    df$sdem <- as.numeric(df$sdem)
+    df$srep <- as.numeric(df$srep)
+    df$hdem <- as.numeric(df$hdem)
+    df$hrep <- as.numeric(df$hrep)
+
+    #create difference variables
+    df$partisan.balance.sen <- df$srep - df$sdem
+    df$partisan.balance.house <- df$hrep - df$hdem
+
+    #create party variables
+    df$party.sen <- NA
+    df$party.sen[df$partisan.balance.sen > 0] <- "R"
+    df$party.sen[df$partisan.balance.sen == 0] <- "Split"
+    df$party.sen[df$partisan.balance.sen < 0] <- "D"
+
+    df$party.house <- NA
+    df$party.house[df$partisan.balance.house > 0] <- "R"
+    df$party.house[df$partisan.balance.house == 0] <- "Split"
+    df$party.house[df$partisan.balance.house < 0] <- "D"
+
+
+
+    #combine
+
+    #create party variable
+    #df$party <- str_extract_all(df$name, "\\(.*$")
+    #df$party <- gsub("\\(", "", df$party)
+    #df$party <- gsub("\\)", "", df$party)
+
+    #take only the important columns
+    #df <- df[c("state", "name", "party", "year")]
+
+    list[[i]] <- df
+
+}
+
+df <- do.call(rbind, list)
+
+
+#get rid of any footnote letters in paranthesies in the state name column.
+df$state <- gsub("[[:space:]]\\([[:lower:]]\\)", "", df$state)
+
+#correct Dist. of Columbia's name.
+df$state[df$state == "Dist. of Columbia"] <- "District of Columbia"
+
+#df.leg.party <- df
+
+#sapply(df, class)
+
+df$year <- as.numeric(df$year)
+
+#test <- left_join(df.main, df)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE)  #399779 rows 
+df.main <- left_join(df.main, df) #399779
+
+
+#df.gov <- df.main  #df.gov is needed for merging later on (only if the Tax Policy Center data chunk is used).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#taxes----
+
+if (FALSE) {  #this is the Tax Policy Center gas tax data, including the interpolation for 2009 and 2012.  Covers 2000-2020.
+
+
+
+
+    #path.tax <- "E:/Data/Transportation/Tax Policy Center/"
+
+    path.tax <- paste0(path.data, "Transportation/Tax Policy Center/")
+
+    #this function imports the State mmoter fuel tax rate of a specified year, drops columns with only NA's, cleans the State name column of extra numbers and punctuation, adds a year column.  Output is a df.
+    fun1 <- function(year, skip_lines) {
+        df <- read_excel(paste0(path.tax, "State Motor Fuel Tax Rates 2000-2020-revised.xlsx"), sheet = year, skip = skip_lines) #load data
+        df <- df[, colSums(is.na(df)) < nrow(df)] #deletes columns that are all NA's
+        df[["State"]] <- gsub('/', '', df[["State"]]) #get rid of '/' marks and numbers (for footnotes) in State column
+        df[["State"]] <- gsub('\\d', '', df[["State"]]) #get rid of '/' marks and numbers (for footnotes) in State column
+        df[["State"]] <- gsub(',', '', df[["State"]]) #get rid of ',' marks (for footnotes) in State column
+        df[["State"]] <- gsub('\\[', '', df[["State"]])
+        df[["State"]] <- gsub('\\]', '', df[["State"]])
+        if (ncol(df) == 10) {
+            #adds an empty "Note" column to any df that doesn't have one.
+            df[["Note"]] <- NA
+        }
+        df[["year"]] <- as.numeric(year)
+        colnames(df) <- c("state", "gas_excise_tax", "gas_other_tax", "gas_total_tax", "diesel_excise_tax", "diesel_other_tax", "diesel_total_tax", "gasohol_excise_tax", "gasohol_other_tax", "gasohol_total_tax", "note", "year")
+        df
+    }
+
+    fun2 <- function(year, skip_lines) {
+        df <- read_excel(paste0(path.tax, "State Motor Fuel Tax Rates 2000-2020-revised.xlsx"), sheet = year, skip = skip_lines)
+        x <- df[, 1:5]
+        y <- df[, 6:10]
+        colnames(y) <- colnames(x)
+        df <- rbind(x, y)
+        df[["Rank"]] <- NULL
+        df[["note"]] <- NA
+        df[["year"]] <- as.numeric(year)
+        setnames(df, "Tax...2", "gas_excise_tax")
+        setnames(df, "Additional Taxes...3", "gas_other_tax")
+        setnames(df, "Total Tax...4", "gas_total_tax")
+        setnames(df, "State...1", "state")
+        df
+    }
+
+    fun3 <- function(year, skip_lines) {
+        df <- read_excel(paste0(path.tax, "State Motor Fuel Tax Rates 2000-2020-revised.xlsx"), sheet = year, skip = skip_lines)
+        x <- df[, 1:3]
+        y <- df[, 4:6]
+        colnames(y) <- colnames(x)
+        df <- rbind(x, y)
+        df[["Rank"]] <- NULL
+        df[["note"]] <- NA
+        df[["year"]] <- as.numeric(year)
+        setnames(df, "Tax...2", "gas_excise_tax")
+        setnames(df, "State...1", "state")
+        df
+    }
+
+    fun4 <- function(year, skip_lines) {
+        df <- read_excel(paste0(path.tax, "State Motor Fuel Tax Rates 2000-2020-revised.xlsx"), sheet = year, skip = skip_lines) #load data
+        df <- df[, colSums(is.na(df)) < nrow(df)] #deletes columns that are all NA's
+        df[["State"]] <- gsub('/', '', df[["State"]]) #get rid of '/' marks and numbers (for footnotes) in State column
+        df[["State"]] <- gsub('\\d', '', df[["State"]]) #get rid of '/' marks and numbers (for footnotes) in State column
+        df[["State"]] <- gsub(',', '', df[["State"]]) #get rid of ',' marks (for footnotes) in State column
+        df[["State"]] <- gsub('\\[', '', df[["State"]])
+        df[["State"]] <- gsub('\\]', '', df[["State"]])
+        df[["year"]] <- as.numeric(year)
+        colnames(df) <- c("state", "gas_total_tax", "gas_excise_tax", "gas_other_tax", "note", "year")
+        df <- df[!is.na(df$gas_total_tax),]
+        df <- df[!is.na(df$state),]
+        df
+    }
+
+
+
+    df20 <- fun1("2020", 5)
+    df19 <- fun1("2019", 5)
+    df18 <- fun1("2018", 5)
+    df17 <- fun1("2017", 5)
+    df16 <- fun1("2016", 5)
+    df15 <- fun1("2015", 3)
+    df14 <- fun1("2014", 3)
+    df13 <- fun1("2013", 3)
+    #there is no 2012.
+    df11 <- fun1("2011", 4)
+    df10 <- fun1("2010", 4)
+    #there is no 2009.
+    df08 <- fun1("2008", 4)
+    df07 <- fun1("2007", 4)
+    df06 <- fun1("2006", 3)
+    df05 <- fun1("2005", 4)
+    df04 <- fun1("2004", 4) #first year with all data categories.
+    df03 <- fun2("2003", 3) #double column, 3 data columns.
+    df02 <- fun3("2002", 2) #double column, 1 data columns.
+    df01 <- fun3("2001", 2) #double column, 1 data columns.
+    df00 <- fun4("2000", 2) #non-double column, 3 data columns.
+
+
+
+
+
+
+
+
+    #there is no 2012.
+    #there is no 2009.
+    #names <- c("df00", "df01", "df02", "df03", "df04", "df05", "df06", "df07", "df08", "df10", "df11", "df13", "df14", "df15", "df16", "df17", "df18", "df19", "df20")
+
+    #df00, df01, df02, df03, 
+    df.list <- list(df04, df05, df06, df07, df08, df10, df11, df13, df14, df15, df16, df17, df18, df19, df20)
+
+    df.main <- do.call(rbind, df.list)
+
+
+
+    #drop all rows with gas_total_tax or state of NA
+    df.main <- df.main[!is.na(df.main$gas_total_tax),]
+    df.main <- df.main[!is.na(df.main$state),]
+
+
+    #must change non-state columns to numeric values.
+    df <- df.main
+    df[,2:ncol(df)] <- sapply(df[,2:ncol(df)],as.numeric) #change all columns other than state to numeric.
+    df.main <- df
+
+
+
+    #change all NA's to zeros   
+    df.main[is.na(df.main)] <- 0
+
+    #change zeros in the note column back to NA's.
+    df.main$note[df.main$note == 0] <- NA
+
+
+
+
+    #backup
+
+    #test <- df.main[order(df.main$state, df.main$year),]
+
+
+
+
+
+    #add early years' data (which are set up differently than the other years)----
+    df.main <- merge.data.frame(df.main, df03, by = c("state", "gas_excise_tax", "gas_other_tax", "gas_total_tax", "note", "year"), all = TRUE)
+    df.main <- merge.data.frame(df.main, df02, by = c("state", "gas_excise_tax", "note", "year"), all = TRUE)
+    df.main <- merge.data.frame(df.main, df01, by = c("state", "gas_excise_tax", "note", "year"), all = TRUE)
+    df.main <- merge.data.frame(df.main, df00, by = c("state", "gas_excise_tax", "gas_other_tax", "gas_total_tax", "note", "year"), all = TRUE)
+
+
+    #drop all rows with gas_total_tax or state of NA
+    df.main <- df.main[!is.na(df.main$gas_excise_tax),]
+    df.main <- df.main[!is.na(df.main$state),]
+
+    #make Washington DC, Federal, and West Virginia names consistent.
+    df.main$state <- gsub('Dist. of Columbia', 'District of Columbia', df.main$state)
+    df.main$state <- gsub('Washington DC', 'District of Columbia', df.main$state)
+    df.main$state <- gsub('FEDERAL', 'Federal', df.main$state)
+    df.main$state <- gsub('W. Virginia', 'West Virginia', df.main$state)
+
+
+    #make variables numeric
+
+    df.main$gas_excise_tax <- as.numeric(df.main$gas_excise_tax)
+    df.main$gas_other_tax <- as.numeric(df.main$gas_other_tax)
+    df.main$gas_total_tax <- as.numeric(df.main$gas_total_tax)
+
+
+    df.main$diesel_excise_tax <- as.numeric(df.main$diesel_excise_tax)
+    df.main$diesel_other_tax <- as.numeric(df.main$diesel_other_tax)
+    df.main$diesel_total_tax <- as.numeric(df.main$diesel_total_tax)
+
+
+    df.main$gasohol_excise_tax <- as.numeric(df.main$gasohol_excise_tax)
+    df.main$gasohol_other_tax <- as.numeric(df.main$gasohol_other_tax)
+    df.main$gasohol_total_tax <- as.numeric(df.main$gasohol_total_tax)
+
+    #get rid of extra spaces at the end of state names.
+    df.main$state <- trimws(df.main$state, which = "right")
+
+
+
+
+    #######interpolate missing years (2009, 2012)######
+
+
+
+    #first add na rows for the missing years for each state
+    state <- unique(df.main$state)
+
+    year <- 2009
+    df <- data.frame(state, year)
+    df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all = TRUE)
+
+    year <- 2012
+    df <- data.frame(state, year)
+    df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all = TRUE)
+
+    #interpolate
+    df.main$gas_excise_tax <- na_interpolation(df.main$gas_excise_tax, option = "linear")
+    df.main$gas_other_tax <- na_interpolation(df.main$gas_other_tax, option = "linear")  #not working
+    df.main$gas_total_tax <- na_interpolation(df.main$gas_total_tax, option = "linear")
+
+    df.main$diesel_excise_tax <- na_interpolation(df.main$diesel_excise_tax, option = "linear")
+    df.main$diesel_other_tax <- na_interpolation(df.main$diesel_other_tax, option = "linear")
+    df.main$diesel_total_tax <- na_interpolation(df.main$diesel_total_tax, option = "linear")
+
+    df.main$gasohol_excise_tax <- na_interpolation(df.main$gasohol_excise_tax, option = "linear")
+    df.main$gasohol_other_tax <- na_interpolation(df.main$gasohol_other_tax, option = "linear")
+    df.main$gasohol_total_tax <- na_interpolation(df.main$gasohol_total_tax, option = "linear")
+
+    df.tax <- df.main
+
+
+
+    #merge df.state.gov and df.main
+
+    df.main <- merge.data.frame(df.gov, df.tax, by = c("state", "year"), all.x = TRUE)  #407376 rows
+    #
+
+}
+
+
+
+
+#gasoline/gasohol and diesel tax data 2000-2018 directly from https://www.fhwa.dot.gov/policyinformation/statistics/2018/MF205.cfm.  
+#Note that this data does not go past 2018 (unlike the Tax Policy Center Data).
+if (TRUE) {
+
+    folder <- "State Motor-Fuel Tax Rates 2000-2018/"
+
+    df <- fread(paste0(path.hw, folder, "gas tax.csv"), header = TRUE)
+    df <- melt.data.table(df, id.vars = "state", value.name = "gas_tax_2000_and_after", variable.name = "year", variable.factor = FALSE, value.factor = FALSE)
+
+    df1 <- df
+
+
+    df <- fread(paste0(path.hw, folder, "diesel tax.csv"), header = TRUE)
+    df <- melt.data.table(df, id.vars = "state", value.name = "diesel_tax", variable.name = "year", variable.factor = FALSE, value.factor = FALSE)
+
+    df <- left_join(df1, df)
+
+    df$year <- as.numeric(df$year)
+    
+    df.main <- left_join(df.main, df)
+
+    #sapply(df, class)
+
+}
+
+
+
+
+
+
+
+
+#extend some election-specific variables in the leg dataset to all years between elections.
+# partyt.winner to to all subsequent NA years up until the next non-NA partyt.winner value.
+# sen to all NA years.
+#replace all election.year NA's with 0's (the 1's represent election years).
+if (TRUE) {
+
+    df.main <- df.main[order(df.main$state, df.main$year),] #put rows in proper order for filling in missing values (they only need to be in order by year -- also ordering by state, ddez, etc is just to improve readability of the df.  #fsort by year should work if this is too slow.
+    df.main <- df.main %>% group_by(state, ddez) %>% fill(partyt.winner, .direction = "down") #extends a state-ddez's partyt.winner value to all subsequent NA years up until the next non-NA partyt.winner value.
+
+    df.main <- df.main %>% group_by(state, ddez) %>% fill(sen, .direction = "down") #39822 NA's
+    df.main <- df.main %>% group_by(state, ddez) %>% fill(sen, .direction = "up")  #there are still 2650 NA's.  #these are all Arkansas districts.  There are a total of 11077 Arkansas districts
+        df.main$sen[is.na(df.main$sen)] <- 0  #replace the NA values with 0. (08-11-2020: I'm not yet sure why 2650 of Arkansas' 11077 districts have sen values of NA so this is a bit of a kludge.  But doing this shouldn't affect any analysis (or any other part of this script) because all (or, in a few cases, nearly all) other district-level variables are also NA's for these districts.)
+            #uu <- df.main[which(is.na(df.main$sen)),]
+            #uu <- df.main[df.main$state == "Arkansas",]
+
+    df.main$election.year[is.na(df.main$election.year)] <- 0   #replace all election.year NA's with 0's (the 1's represent election years).
+
+
+    #do 1 year lagg of partyt.winner, and name it party.inc.
+
+    df <- df.main[, c("state", "ddez", "year", "partyt.winner")]
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + 1
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[4:b] <- paste0(colnames(df)[4:b], ".tm1")
+    df.main <- left_join(df.main, df)
+
+    setnames(df.main, "partyt.winner.tm1", "party.inc")
+
+}
+
+
+
+
+
+
+#Partisan control from the Council of State Governments data.  
+#2005 onward.
+
+if (TRUE) {
+
+    #path.leg
+
+    #df <- read_excel(paste0(path.leg, "3.3 2019.xlsx"))
+
+
+
+    files <- list.files(path = path.leg)
+
+    tt <- lapply(paste(path.leg, files, sep = ""), read_excel)
+
+    #tt <- read_excel(paste(path.leg, files[14], sep = ""))
+
+    list <- list()
+
+    for (i in 1:length(files)) {
+        a <- which(tt[[i]][, 1] == "Alabama") #row where data starts
+
+        b <- which(tt[[i]][, 1] == "American Samoa") #row where data ends
+        b <- b - 1 #excludes the American Samoa line
+
+        df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+
+        df <- df[!is.na(df[, 1]),] #drop any rows with NAs in the first column.
+
+        #create year variable
+        year <- substr(files[i], 5, 8) #extracts year from the file name.
+        df$year <- year
+
+        #change column names
+        colnames(df)[1] <- "state"
+        colnames(df)[2] <- "sdem"
+        colnames(df)[3] <- "srep"
+        colnames(df)[7] <- "sterm"
+        colnames(df)[9] <- "hdem"
+        colnames(df)[10] <- "hrep"
+        colnames(df)[14] <- "hterm"
+
+        #take only columns I want.
+        df <- df[c("state", "year", "sdem", "srep", "sterm", "hdem", "hrep", "hterm")]
+
+        #format data columns to be numeric
+        df$sdem <- gsub("[[:space:]]", "", df$sdem)
+        df$sdem <- gsub("[[:alpha:]]", "", df$sdem)
+        df$sdem <- gsub("[[:punct:]]", "", df$sdem)
+
+        df$srep <- gsub("[[:space:]]", "", df$srep)
+        df$srep <- gsub("[[:alpha:]]", "", df$srep)
+        df$srep <- gsub("[[:punct:]]", "", df$srep)
+
+        df$hdem <- gsub("[[:space:]]", "", df$hdem)
+        df$hdem <- gsub("[[:alpha:]]", "", df$hdem)
+        df$hdem <- gsub("[[:punct:]]", "", df$hdem)
+
+        df$hrep <- gsub("[[:space:]]", "", df$hrep)
+        df$hrep <- gsub("[[:alpha:]]", "", df$hrep)
+        df$hrep <- gsub("[[:punct:]]", "", df$hrep)
+
+        df$sdem <- as.numeric(df$sdem)
+        df$srep <- as.numeric(df$srep)
+        df$hdem <- as.numeric(df$hdem)
+        df$hrep <- as.numeric(df$hrep)
+
+        #create difference variables
+        df$dif.house <- df$hdem - df$hrep
+        df$dif.sen <- df$sdem - df$srep
+        
+
+        #create party variables
+        df$party.hmaj <- NA
+        df$party.hmaj[df$dif.house > 0] <- "d"
+        df$party.hmaj[df$dif.house < 0] <- "r"
+        df$party.hmaj[df$dif.house == 0] <- "split"
+
+        df$party.smaj <- NA
+        df$party.smaj[df$dif.sen > 0] <- "d"
+        df$party.smaj[df$dif.sen < 0] <- "r"
+        df$party.smaj[df$dif.sen == 0] <- "split"
+
+
+
+        #combine
+
+        #create party variable
+        #df$party <- str_extract_all(df$name, "\\(.*$")
+        #df$party <- gsub("\\(", "", df$party)
+        #df$party <- gsub("\\)", "", df$party)
+
+        #take only the important columns
+        #df <- df[c("state", "name", "party", "year")]
+
+        list[[i]] <- df
+
+    }
+
+    df <- do.call(rbind, list)
+
+
+    #get rid of any footnote letters in paranthesies in the state name column.
+    df$state <- gsub("[[:space:]]\\([[:lower:]]\\)", "", df$state)
+
+    #correct Dist. of Columbia's name.
+    df$state[df$state == "Dist. of Columbia"] <- "District of Columbia"
+
+    state.leg.party.control.2005.onward <- df[, c("state", "year", "party.hmaj", "party.smaj")]  #these columns must match those from annual_regression_data.dta below so that a cbind is possible.
+
+}
+
+
+#######more tax data-----########
+#this is state data that was collected in an article's data: Li, Shanjun, Joshua Linn, and Erich Muehlegger. 2014. “Gasoline Taxes and Consumer Behavior.” American Economic Journal: Economic Policy 6 (4): 302–42.
+#Data available here: https://www.openicpsr.org/openicpsr/project/114882/version/V1/view;jsessionid=CEF58E4762D8134FF6B5A130C1EF1011?path=/openicpsr/114882/fcr:versions/V1/Web_materials
+#variables of interest: sgastax  budget_surplus  gas_tax_all  real_oilprice  unemployment  autos_capita taxin_gas_price region and others
+#This dataset has a lot of variables.  I may want to drop some to reduce dataframe size.
+#1966-2008
+
+
+if (TRUE) {
+
+
+    #demsfrac, demshfrac:  the fraction of a state’s house and senate seats occupied by Democrats.
+    #Democrat_Gov: mostly 0's and 1's.  (a few 0.5's).
+
+    df <- read.dta(paste0(path.t, "annual_regression_data.dta"))
+    df <- df[!is.na(df$fips),]
+
+    #df <- df[c("state", "year", "sgastax", "budget_surplus", "autos_capita", "drivers_capita", "road_mileage", "nom_oilprice", "real_oilprice", "unemployment", "demhfrac", "demsfrac", "Democrat_Gov", "urbanization", "fgastax", "hug")] #take only variables I want. (at minimum, I need 'state', 'year', and 'sgastax').
+    #'hug' is highway gas consumption
+
+
+    #merge all the variables frim annual_regression_data.dta by state year. 
+    
+    df.main <- left_join(df.main, df)
+
+    #make variables for dem majority in state house and senate.
+
+    #use two of the variables from annual_regression_data.dta to make another df of just partisan control of each state house.
+    #this will be merged with the partisan control data from the Council of State Governments (see above).
+
+    df$party.hmaj <- NA
+    df$party.hmaj[df$demhfrac > 0.5] <- "d"
+    df$party.hmaj[df$demhfrac < 0.5] <- "r"
+    df$party.hmaj[df$demhfrac == 0.5] <- "split"
+
+    df$party.smaj <- NA
+    df$party.smaj[df$demsfrac > 0.5] <- "d"
+    df$party.smaj[df$demsfrac < 0.5] <- "r"
+    df$party.smaj[df$demsfrac == 0.5] <- "split"
+
+    df <- df[, c("state", "year", "party.hmaj", "party.smaj")] #these columns must match those from Council of State Governments (above) so that a rbind is possible.
+
+    df <- df[df$year < 2005,]  #prevent overlapping years with the data from the Council of State Governments (above)
+
+    state.leg.party.control <- rbind(df, state.leg.party.control.2005.onward)
+    state.leg.party.control$year <- as.numeric(state.leg.party.control$year)
+
+    df.main <- left_join(df.main, state.leg.party.control)
+
+
+}
+
+
+
+
+
+
+
+#make variable of vote-share for the majority party
+if (TRUE) {
+
+    #sen variable probably has to be extended for all years (check if this is true -- yes).
+        #df.main <- df.main[order(df.main$state, df.main$year),] #put rows in proper order for filling in missing values (they only need to be in order by year -- also ordering by state, ddez, etc is just to improve readability of the df.  #fsort by year should work if this is too slow.  # 287232 NA's.
+        #df.main <- df.main %>% group_by(state, ddez) %>% fill(sen, .direction = "down") #39822 NA's
+        #df.main <- df.main %>% group_by(state, ddez) %>% fill(sen, .direction = "up")  #there are still 2650 NA's.  #these are all Arkansas districts.  There are a total of 11077 Arkansas districts
+        #df.main[,is.na(df.main$sen)] <- 0  #replace the NA values with 0.
+
+        #it appears that Arkansas may have switched district naming systems at some point, 
+        
+
+
+
+        uu <- df.main[df.main$sen == 0,]
+        uu <- uu[!is.na(uu$sen),]
+        uu$vote.pro.maj.party <- NA
+        uu$vote.pro.maj.party[which(uu$partyt.winner == uu$party.hmaj)] <- uu$vote.winner[which(uu$partyt.winner == uu$party.hmaj)]
+        uu$vote.pro.maj.party[which(uu$partyt.winner != uu$party.hmaj)] <- uu$vote.loser[which(uu$partyt.winner != uu$party.hmaj)]
+        #uu <- uu[, c("state", "ddez", "year", "vote.pro.maj.party", "vote.winner", "vote.loser", "partyt.winner", "party.hmaj", "demhfrac", "demsfrac", "sen", "election.year")]
+        uu <- uu[, c("state", "ddez", "year", "vote.pro.maj.party")]
+        df1 <- uu
+
+
+        uu <- df.main[df.main$sen == 1,]
+        uu <- uu[!is.na(uu$sen),]
+        uu$vote.pro.maj.party <- NA
+        uu$vote.pro.maj.party[which(uu$partyt.winner == uu$party.smaj)] <- uu$vote.winner[which(uu$partyt.winner == uu$party.smaj)]
+        uu$vote.pro.maj.party[which(uu$partyt.winner != uu$party.smaj)] <- uu$vote.loser[which(uu$partyt.winner != uu$party.smaj)]
+        df2 <- uu[, c("state", "ddez", "year", "vote.pro.maj.party")]
+
+    
+        df <- rbind(df1, df2) #399779 rows, 08-11-2020.
+
+        df.main <- left_join(df.main, df)
+
+
+
+
+        uu <- df.main[!is.na(df.main$party.inc),]
+        uu$vote.pro.inc.party <- NA
+        uu$vote.pro.inc.party[which(uu$partyt.winner == uu$party.inc)] <- uu$vote.winner[which(uu$partyt.winner == uu$party.inc)]
+        uu$vote.pro.inc.party[which(uu$partyt.winner != uu$party.inc)] <- uu$vote.loser[which(uu$partyt.winner != uu$party.inc)]
+        df <- uu[, c("state", "ddez", "year", "vote.pro.inc.party")]
+
+        df.main <- left_join(df.main, df)
+
+
+        rm(uu)
+
+
+
+
+}
+
+
+
+
+
+
+#make tenure1 and tenure2 variables incumbent party and nonincumbent party.
+if (TRUE) {
+
+    uu <- df.main[!is.na(df.main$party.inc),]
+    uu$tenure1.inc.party <- NA
+    uu$tenure1.inc.party[which(uu$party.inc == "d")] <- uu$tenure1.dem[which(uu$party.inc == "d")]
+    uu$tenure1.inc.party[which(uu$party.inc == "r")] <- uu$tenure1.rep[which(uu$party.inc == "r")]
+
+    uu$tenure2.inc.party <- NA
+    uu$tenure2.inc.party[which(uu$party.inc == "d")] <- uu$tenure2.dem[which(uu$party.inc == "d")]
+    uu$tenure2.inc.party[which(uu$party.inc == "r")] <- uu$tenure2.rep[which(uu$party.inc == "r")]
+
+
+    uu$tenure1.noninc.party <- NA
+    uu$tenure1.noninc.party[which(uu$party.inc == "r")] <- uu$tenure1.dem[which(uu$party.inc == "r")]
+    uu$tenure1.noninc.party[which(uu$party.inc == "d")] <- uu$tenure1.rep[which(uu$party.inc == "d")]
+
+    uu$tenure2.noninc.party <- NA
+    uu$tenure2.noninc.party[which(uu$party.inc == "r")] <- uu$tenure2.dem[which(uu$party.inc == "r")]
+    uu$tenure2.noninc.party[which(uu$party.inc == "d")] <- uu$tenure2.rep[which(uu$party.inc == "d")]
+
+    uu <- uu[, c("state", "ddez", "year", "tenure1.inc.party", "tenure2.inc.party", "tenure1.noninc.party", "tenure2.noninc.party")]
+
+    df.main <- left_join(df.main, uu)
+
+}
+
+
+#this data is from:
+#Leduc, Sylvain, and Daniel Wilson. 2017. “Are State Governments Roadblocks to Federal Stimulus? Evidence on the Flypaper Effect of Highway Grants in the 2009 Recovery Act.” American Economic Journal: Economic Policy 9 (2): 253–92. https://doi.org/10.1257/pol.20140371.
+#1979-2013.
+#about ARRA stuff.
+
+if (TRUE) {
+
+    df <- read.dta13(paste0(path.t, "master_flypaperSubmitted.dta"))  #69 columns, 1750 rows, 1979-2013.
+    df$state <- NULL  #this is a state abreviation column.  Alternative to deleting it is this: #setnames(df, "state", "state.abv")
+    df$statecode <- NULL   #delete this column because other dataframes have similarly named columns with different values, which may eventually cause merging problems.
+    setnames(df, "name", "state")
+
+    df.main <- left_join(df.main, df)
+
+}
+
+
+
+
+
+
+#combine sgastax and gas_total_tax into a single time series called gas_tax
+
+if (TRUE) {
+
+    df <- df.main[,c("year", "state", "ddez", "sgastax")]
+    df <- df[df$year <= 2000,]
+    setnames(df, "sgastax", "gas_tax")
+    df1 <- df
+
+    df <- df.main[,c("year", "state", "ddez", "gas_tax_2000_and_after")]
+    df <- df[df$year >= 2001,]
+    setnames(df, "gas_tax_2000_and_after", "gas_tax")
+    df2 <- df
+
+    df <- rbind(df1, df2)
+
+    df$year <- as.numeric(df$year)
+
+    df.main <- left_join(df.main, df)
+
+    #make a variable of the log of gas_tax.
+    #df.main$gas_tax.log <- log(df.main$gas_tax)
+
+}
+
+
+
+
+
+#######highways----#######
+
+#folder <- "Bridge Condition by Highway System by year/" #2009-2019, headings and columns are consistent. 3-row header (so skip first 2-rows), Data on NHS bridges starts on an inconcistent row number, but always starts with the row with "NHS Bridges" in column 1.
+
+#folder <- "Structurally Deficient Bridges by year/1992-2015/"  #1992-2017, has SD (structurally deficient) and FO (functionally obsolete) categories from 1992-2015.  After 2015, FO category is discontinued.  #everthing before 2016 has the same columns and headers.  #2017 has a 3 row header (so skip 2) while 2016 has just a 2 row header (so skip 1 row), but their columns otherwise match each other (but not the pre 2016 files).
+#For 1992-2015, All Bridges data goes through row 55 (includes Puerto Rico and Totals). Same for 2016, though the columns are different.
+#For 2017, All Bridges data goes through row 56 (because of 1 row offset at the top)
+#state names are all caps.-
+#Data on NHS bridges starts with the row with "NHS Bridges" in column 1.
+#DIST. OF COL. 
+
+#indicate whether I want the bridge variables to be for all bridges or just NHS bridges. 
+#"1" is for all bridges and "2" is for NHS bridges only.
+#value set at top of script.
+#all_or_nhs_bridges <- 1 
+
+column.names <- c("state", "bridge.count", "sd.bridge.count", "fo.bridge.count", "def.bridge.count", "bridge.area", "sd.bridge.area", "fo.bridge.area", "def.bridge.area", "year")
+
+folder <- "Structurally Deficient Bridges by year/1992-2015/"
+path <- paste0(path.hw, folder)
+files <- list.files(path = path)
+
+file.years <- str_extract(files, "\\d{4}")
+file.years <- as.numeric(file.years)
+
+tt <- lapply(paste(path, files, sep = ""), read_excel)
+
+list <- list()
+
+for (i in 1:length(files)) {
+
+    a <- which(tt[[i]][, 1] == "ALABAMA") #row where data starts
+    a <- a[all_or_nhs_bridges] #there are two rows with this state name, so take the row number of the first instance for all bridges, second instance for just NHS bridges. #all_or_nhs_bridges value set at top of script.
+    a <- a - 0 #this is the rownumber right above ALABAMA (so it's the column name row)
+    
+    b <- which(tt[[i]][, 1] == "WYOMING") #row where data ends
+    b <- b[all_or_nhs_bridges]  #all_or_nhs_bridges value set at top of script.
+
+    df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+    df$year <- file.years[[i]]
+
+    list[[i]] <- df
+}
+
+df <- do.call(rbind, list)
+colnames(df) <- column.names
+df$state[df$state == "DIST. OF COL."] <- "District of Columbia"
+df$state <- state2abbr(df$state)
+df$state <- abbr2state(df$state)  #change statenames to normal capitalization.
+df[,2:ncol(df)] <- sapply(df[,2:ncol(df)],as.numeric) #change all columns other than state to numeric.
+#sapply(df, class) #check classes.
+
+df1 <- df
+
+
+#df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all = TRUE)
+
+
+
+
+column.names <- c("state", "bridge.count", "sd.bridge.count", "bridge.area", "sd.bridge.area", "year")
+folder <- "Structurally Deficient Bridges by year/2016-2017/"
+
+path <- paste0(path.hw, folder)
+files <- list.files(path = path)
+
+file.years <- str_extract(files, "\\d{4}")
+file.years <- as.numeric(file.years)
+
+tt <- lapply(paste(path, files, sep = ""), read_excel)
+
+list <- list()
+
+for (i in 1:length(files)) {
+
+    a <- which(tt[[i]][, 1] == "ALABAMA") #row where data starts
+    a <- a[all_or_nhs_bridges] #there are two rows with this state name, so take the row number of the first instance for all bridges, second instance for just NHS bridges.  #all_or_nhs_bridges value set at top of script.
+    a <- a - 0 #this is the rownumber right above ALABAMA (so it's the column name row)
+    
+    b <- which(tt[[i]][, 1] == "WYOMING") #row where data ends
+    b <- b[all_or_nhs_bridges]  #all_or_nhs_bridges value set at top of script.
+
+    df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+    df$year <- file.years[[i]]
+
+    list[[i]] <- df
+}
+
+df <- do.call(rbind, list)
+colnames(df) <- column.names
+df$state[df$state == "DIST. OF COL."] <- "District of Columbia"
+df$state <- state2abbr(df$state)
+df$state <- abbr2state(df$state)  #change statenames to normal capitalization.
+df[,2:ncol(df)] <- sapply(df[,2:ncol(df)],as.numeric) #change all columns other than state to numeric.
+#sapply(df, class) #check classes.
+df2 <- df
+
+
+
+#uu1 <- merge.data.frame(df1, df2, by = column.names, all = TRUE) #merges by all the columns in df2, which prevents column redundancy.
+uu <- left_join(df1, df2)
+df.main <- left_join(df.main, uu)
+
+#test <- merge.data.frame(df.main, uu, by = c("state", "year"), all.x = TRUE) #407376 rows
+
+
+
+column.names <- c("state", "bridge.count", "good.bridge.count", "fair.bridge.count", "poor.bridge.count", "bridge.area", "good.bridge.area", "fair.bridge.area", "poor.bridge.area", "year")
+folder <- "Bridge Condition by Highway System by year/"
+
+path <- paste0(path.hw, folder)
+files <- list.files(path = path)
+
+file.years <- str_extract(files, "\\d{4}")
+file.years <- as.numeric(file.years)
+
+tt <- lapply(paste(path, files, sep = ""), read_excel)
+
+list <- list()
+
+for (i in 1:length(files)) {
+
+    a <- which(tt[[i]][, 1] == "ALABAMA") #row where data starts
+    a <- a[all_or_nhs_bridges] #there are two rows with this state name, so take the row number of the first instance for all bridges, second instance for just NHS bridges.  #all_or_nhs_bridges value set at top of script.
+    a <- a - 0 #this is the rownumber right above ALABAMA (so it's the column name row)
+    
+    b <- which(tt[[i]][, 1] == "WYOMING") #row where data ends
+    b <- b[all_or_nhs_bridges]
+    df <- tt[[i]][a:b,] #drop the extra rows at the beginning and end of the dataframe.
+
+    df$year <- file.years[[i]]
+
+    list[[i]] <- df
+}
+
+df <- do.call(rbind, list)
+
+colnames(df) <- column.names
+df$state[df$state == "DIST. OF COL."] <- "District of Columbia"
+df$state <- state2abbr(df$state)
+df$state <- abbr2state(df$state)  #change statenames to normal capitalization.
+
+df$bridge.count <- NULL #drop bridge.count and bridge.area because they are redundant with the names and values merged in with df.main above.
+df$bridge.area <- NULL
+
+df[,2:ncol(df)] <- sapply(df[,2:ncol(df)],as.numeric) #change all columns other than state to numeric.
+#sapply(df, class) #check classes.
+
+#test <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE) #407376 rows.
+df.main <- left_join(df.main, df)
+
+
+
+
+
+#added 08-27-2020
+if (TRUE) {
+
+
+    #make variables of bridge.count - def.bridge.count, and bridge.area - def.bridge.area
+    df.main$ok.bridge.count <- df.main$bridge.count - df.main$def.bridge.count
+    df.main$ok.bridge.area <- df.main$bridge.area - df.main$def.bridge.area
+
+
+    #Combine highway quality measures from pre-2009 to 2009 and after.
+    #measures (sd to poor, fo to fair, the rest to good).
+
+    df.main$poor.bridge.count.adj <- NA
+    df.main$poor.bridge.count.adj[df.main$year < 2009] <- df.main$sd.bridge.count[df.main$year < 2009]
+    df.main$poor.bridge.count.adj[df.main$year > 2008] <- df.main$poor.bridge.count[df.main$year > 2008]
+
+    df.main$poor.bridge.area.adj <- NA
+    df.main$poor.bridge.area.adj[df.main$year < 2009] <- df.main$sd.bridge.area[df.main$year < 2009]
+    df.main$poor.bridge.area.adj[df.main$year > 2008] <- df.main$poor.bridge.area[df.main$year > 2008]
+
+    df.main$fair.bridge.count.adj <- NA
+    df.main$fair.bridge.count.adj[df.main$year < 2009] <- df.main$fo.bridge.count[df.main$year < 2009]
+    df.main$fair.bridge.count.adj[df.main$year > 2008] <- df.main$fair.bridge.count[df.main$year > 2008]
+
+    df.main$fair.bridge.area.adj <- NA
+    df.main$fair.bridge.area.adj[df.main$year < 2009] <- df.main$fo.bridge.area[df.main$year < 2009]
+    df.main$fair.bridge.area.adj[df.main$year > 2008] <- df.main$fair.bridge.area[df.main$year > 2008]
+
+    df.main$good.bridge.count.adj <- NA
+    df.main$good.bridge.count.adj[df.main$year < 2009] <- df.main$ok.bridge.count[df.main$year < 2009]
+    df.main$good.bridge.count.adj[df.main$year > 2008] <- df.main$good.bridge.count[df.main$year > 2008]
+
+    df.main$good.bridge.area.adj <- NA
+    df.main$good.bridge.area.adj[df.main$year < 2009] <- df.main$ok.bridge.area[df.main$year < 2009]
+    df.main$good.bridge.area.adj[df.main$year > 2008] <- df.main$good.bridge.area[df.main$year > 2008]
+
+
+}
+
+
+
+
+
+
+
+#economy-----
+
+#try SAINC, SAEMP25N__ALL_AREAS_1998_2018.csv #state employment data
+# CAEMP25N , CAEMP25N__ALL_AREAS_2001_2018.csv #county (and state) employment data
+#CAINC5N, CAINC5N__ALL_AREAS_2001_2018.csv  #income, counties and states
+
+folder <- "SAINC/" #state employment data
+df <- read_csv(paste0(path.bea, folder, "SAEMP25N__ALL_AREAS_1998_2018.csv")) #TO FIX: identify this file in its folder by the presense of the words "all_areas" in its file name.  This will make the script less sensitive future updates of this file.
+df <- df[!is.na(df$GeoName),] #gets rid of the footnote rows at the bottom.
+df <- df[df$LineCode == 10,] #take only rows total employment
+#change df to long format
+df <- melt(df, id.vars = c("GeoFIPS", "GeoName", "Region", "TableName", "LineCode", "IndustryClassification", "Description", "Unit"))
+df$value <- as.numeric(df$value)
+setnames(df, "variable", "year")
+setnames(df, "value", "employment.total")
+setnames(df, "GeoName", "state")
+df <- df[c("state", "year", "employment.total")]
+df$year <- as.numeric(df$year)
+
+#test <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE) #407376 rows
+df.main <- left_join(df.main, df)
+
+
+
+folder <- "CAINC1/" #per capita income
+#df <- read_csv(paste0(path.bea, folder, "CAINC1__ALL_AREAS_1969_2018.csv"))
+
+df <- fread(paste0(path.bea, folder, "CAINC1__ALL_AREAS_1969_2018.csv"), fill = TRUE)
+
+
+df <- df[!is.na(df$Region),] #gets rid of the footnote rows at the bottom.
+CAINC1 <- df
+
+df <- CAINC1
+df <- df[df$LineCode == 2,] #LineCode 2 is population (unit: individual people).  LineCode 1 is total income in nominal dollars (thousands).  LineCode 3 is per capita income in nominal dollars.
+#change df to long format
+df <- melt(df, id.vars = c("GeoFIPS", "GeoName", "Region", "TableName", "LineCode", "IndustryClassification", "Description", "Unit"))
+#change variable names
+df$value <- as.numeric(df$value)
+setnames(df, "value", "pop")
+setnames(df, "variable", "year")
+setnames(df, "GeoName", "state")
+df <- df[c("state", "year", "pop")]
+df$year <- as.numeric(df$year)
+
+#test <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE) #407376 rows.
+df.main <- left_join(df.main, df)
+
+df <- CAINC1
+df <- df[df$LineCode == 1,] #LineCode 2 is population (unit: individual people).  LineCode 1 is total income in nominal dollars (thousands).  LineCode 3 is per capita income in nominal dollars.
+#change df to long format
+df <- melt(df, id.vars = c("GeoFIPS", "GeoName", "Region", "TableName", "LineCode", "IndustryClassification", "Description", "Unit"))
+#change variable names
+df$value <- as.numeric(df$value)
+setnames(df, "value", "income")
+setnames(df, "variable", "year")
+setnames(df, "GeoName", "state")
+df <- df[c("state", "year", "income")]
+df$year <- as.numeric(df$year)
+
+#df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE) #407376 rows.
+df.main <- left_join(df.main, df)
+
+df <- CAINC1
+df <- df[df$LineCode == 3,] #LineCode 2 is population (unit: individual people).  LineCode 1 is total income in nominal dollars (thousands).  LineCode 3 is per capita income in nominal dollars.
+#change df to long format
+df <- melt(df, id.vars = c("GeoFIPS", "GeoName", "Region", "TableName", "LineCode", "IndustryClassification", "Description", "Unit"))
+#change variable names
+df$value <- as.numeric(df$value)
+setnames(df, "value", "income.percap")
+setnames(df, "variable", "year")
+setnames(df, "GeoName", "state")
+df <- df[c("state", "year", "income.percap")]
+df$year <- as.numeric(df$year)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "year"), all.x = TRUE) #407376 rows.
+df.main <- left_join(df.main, df)
+
+
+
+
+
+
+#vote count for state leg candidates from the governor's party.
+#plyr::count(df.main$party.gov)
+
+if (TRUE) {
+
+    df.main$vote.pro.gov <- NA
+    df.main$vote.pro.gov[which(df.main$party.gov == "D")] <- df.main$vote.dem[which(df.main$party.gov == "D")]
+    df.main$vote.pro.gov[which(df.main$party.gov == "R")] <- df.main$vote.rep[which(df.main$party.gov == "R")]
+
+
+
+    #df.main$vote.anti.gov <- NA
+    #df.main$vote.anti.gov[which(df.main$party.gov == "D")] <- df.main$vote.dem[which(df.main$party.gov == "D")]
+    #df.main$vote.anti.gov[which(df.main$party.gov == "R")] <- df.main$vote.rep[which(df.main$party.gov == "R")]
+
+    
+}
+
+
+
+
+
+#582677 rows for df.main.  Should be 399779.
+
+#combined variables-----
+
+df.main$vote.total <- df.main$vote.inc + df.main$vote.noninc #causes one problem of total vote 0.
+#df.main$vote.total <- df.main$vote.dem + df.main$vote.nondem
+
+df.main$vote.inc.prop <- df.main$vote.inc / df.main$vote.total
+df.main$vote.noninc.prop <- df.main$vote.noninc / df.main$vote.total
+
+df.main$vote.dem.prop <-  df.main$vote.dem / df.main$vote.total
+df.main$vote.nondem.prop <- df.main$vote.nondem / df.main$vote.total
+df.main$vote.rep.prop <- df.main$vote.rep / df.main$vote.total
+df.main$vote.nonrep.prop <- df.main$vote.nonrep / df.main$vote.total
+
+df.main$vote.pro.gov.prop <- df.main$vote.pro.gov / df.main$vote.total
+
+df.main$vote.winner.prop <- df.main$vote.winner / df.main$vote.total
+df.main$vote.loser.prop <- df.main$vote.loser / df.main$vote.total
+
+df.main$vote.pro.maj.party.prop <- df.main$vote.pro.maj.party / df.main$vote.total
+
+df.main$vote.pro.inc.party.prop <- df.main$vote.pro.inc.party / df.main$vote.total
+
+
+df.main$sd.bridge.area.prop <- df.main$sd.bridge.area / df.main$bridge.area
+df.main$sd.bridge.count.prop <- df.main$sd.bridge.count / df.main$bridge.count
+
+df.main$def.bridge.area.prop <- df.main$def.bridge.area / df.main$bridge.area
+df.main$def.bridge.count.prop <- df.main$def.bridge.count / df.main$bridge.count
+
+df.main$fo.bridge.area.prop <- df.main$fo.bridge.area / df.main$bridge.area
+df.main$fo.bridge.count.prop <- df.main$fo.bridge.count / df.main$bridge.count
+
+
+#added 08-27-2020
+if (TRUE) {
+
+    df.main$poor.bridge.count.adj.prop <- df.main$poor.bridge.count.adj / df.main$bridge.count
+    df.main$poor.bridge.area.adj.prop <- df.main$poor.bridge.area.adj / df.main$bridge.area
+    df.main$fair.bridge.count.adj.prop <- df.main$fair.bridge.count.adj / df.main$bridge.count
+    df.main$fair.bridge.area.adj.prop <- df.main$fair.bridge.area.adj / df.main$bridge.area
+    df.main$good.bridge.count.adj.prop <- df.main$good.bridge.count.adj / df.main$bridge.count
+    df.main$good.bridge.area.adj.prop <- df.main$good.bridge.area.adj / df.main$bridge.area
+
+}
+
+
+
+
+
+#make vote.pro.inc.party.prop.most.recent variable
+if (TRUE) {
+
+    df.main$vote.pro.inc.party.prop.most.recent <- df.main$vote.pro.inc.party.prop
+
+    df.main <- df.main[order(df.main$state, df.main$year),] #put rows in proper order for filling in missing values (they only need to be in order by year -- also ordering by state, ddez, etc is just to improve readability of the df.  #fsort by year should work if this is too slow.
+    df.main <- df.main %>% group_by(state, ddez) %>% fill(vote.pro.inc.party.prop.most.recent, .direction = "down") #extends a state-ddez's partyt.winner value to all subsequent NA years up until the next non-NA partyt.winner value.
+
+}
+
+
+
+
+
+##### CPI data######-----
+#converts dollars to 1984 levels
+uu <- read_excel(paste0(path.data, "BLS/CPI/CPIAUCSL.xls"), skip = 10)
+uu$year <- str_extract(uu$observation_date, "\\d{4}")
+setnames(uu, "CPIAUCSL", "cpi")
+uu <- group_by(uu, year)
+uu <- summarise_at(uu, "cpi", funs(mean))
+uu$cpi <- uu$cpi / 100
+uu$year <- as.numeric(uu$year)
+
+df.main <- left_join(df.main, uu)
+
+#test <- merge.data.frame(df.main, uu, by = "year", all.x = TRUE)  #407376
+
+
+
+
+
+
+#adjust for inflation 
+df.main$income <- df.main$income * df.main$cpi
+df.main$income.percap <- df.main$income.percap * df.main$cpi
+
+
+
+
+
+#create a dummy variable for observations after 2008.
+#this is to deal with the highway bridge evaluation system changing in 2009.
+#interact this dummy with the highway quality measure to allow the slope of the highway quality variable to change before and after the switch.
+#added 08-27-2020.
+if (TRUE) {
+
+    df.main$post2008 <- NA 
+    df.main$post2008[df.main$year < 2009] <- 0
+    df.main$post2008[df.main$year > 2008] <- 1
+
+}
+
+
+
+
+
+
+
+
+
+
+#lag variables-----
+
+
+
+#for faster dataframe merging, see: https://www.infoworld.com/article/3454356/how-to-merge-data-in-r-using-r-merge-dplyr-or-datatable.html
+#dplyr's left_join(x, y, by = c("df1ColName" = "df2ColName"))
+
+#setup proper column order for df.main
+df <- df.main[, c("state", "ddez", "year")]
+df.main <- left_join(df, df.main)
+#df.main <- merge.data.frame(df, df.main, by = c("state", "ddez", "year")) #407376
+
+num_of_id_cols <- 3
+
+
+
+
+df.for.lagging <- df.main
+
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + 1
+a <- colnames(df)
+b <- length(a)
+colnames(df)[4:b] <- paste0(colnames(df)[4:b], ".tm1")
+df.main <- left_join(df.main, df)
+
+#df.main <- merge.data.frame(df.main, df, by = c("state", "ddez", "year"), all.x = TRUE)
+
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + 2
+a <- colnames(df)
+b <- length(a)
+colnames(df)[4:b] <- paste0(colnames(df)[4:b], ".tm2")
+df.main <- left_join(df.main, df)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "ddez", "year"), all.x = TRUE)
+
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + 3
+a <- colnames(df)
+b <- length(a)
+colnames(df)[4:b] <- paste0(colnames(df)[4:b], ".tm3")
+df.main <- left_join(df.main, df)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "ddez", "year"), all.x = TRUE)
+
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + 4
+a <- colnames(df)
+b <- length(a)
+colnames(df)[4:b] <- paste0(colnames(df)[4:b], ".tm4")
+df.main <- left_join(df.main, df)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "ddez", "year"), all.x = TRUE)
+
+
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + 5
+a <- colnames(df)
+b <- length(a)
+colnames(df)[5:b] <- paste0(colnames(df)[5:b], ".tm5")
+df.main <- left_join(df.main, df)
+#df.main <- merge.data.frame(df.main, df, by = c("state", "ddez", "year"), all.x = TRUE)
+
+lag <- 6 
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + lag
+a <- colnames(df)
+b <- length(a)
+colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+df.main <- left_join(df.main, df)
+
+
+if (FALSE) {
+
+    lag <- 7 
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+    lag <- 8 
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+}
+
+
+
+
+
+
+
+
+#identify various election years----
+
+start.year <- 1968
+end.year <- max(df.main$year)
+years <- seq(start.year, end.year, 2)
+df.main$year.even <- 0
+df.main$year.even[df.main$year %in% years] <- 1
+
+start.year <- 1969
+end.year <- max(df.main$year)
+years <- seq(start.year, end.year, 2)
+df.main$year.odd <- 0
+df.main$year.odd[df.main$year %in% years] <- 1
+
+
+start.year <- 1968
+end.year <- max(df.main$year)
+years <- seq(start.year, end.year, 4)
+df.main$year.pres.election <- 0
+df.main$year.pres.election[df.main$year %in% years] <- 1
+
+start.year <- 1970
+end.year <- max(df.main$year)
+years <- seq(start.year, end.year, 4)
+df.main$year.midterm <- 0
+df.main$year.midterm[df.main$year %in% years] <- 1
+
+
+#change year to numeric and add year.fe variable
+#df.main$year.fe <- as.character(df.main$year)
+df.main$year <- as.numeric(df.main$year)
+
+#df.main$year.midterm.fe <- as.character(df.main$year.midterm)
+#df.main$year.pres.election.fe <- as.character(df.main$year.pres.election)
+#df.main$year.pres.election.fe <- as.character(df.main$year.pres.election)
+#df.main$year.odd.fe <- as.character(df.main$year.odd)
+#df.main$year.even.fe <- as.character(df.main$year.even)
+
+
+
+
+#variables of interest change-----
+
+fun.change <- function(df, col1) {
+    df[[paste0(col1, ".change", ".1y")]] <- df[[col1]] - df[[paste0(col1, ".tm1")]]
+    df[[paste0(col1, ".change", ".2y")]] <- df[[col1]] - df[[paste0(col1, ".tm2")]]
+    df[[paste0(col1, ".change", ".3y")]] <- df[[col1]] - df[[paste0(col1, ".tm3")]]
+    df[[paste0(col1, ".change", ".4y")]] <- df[[col1]] - df[[paste0(col1, ".tm4")]]
+    df
+}
+
+
+
+#df.main <- fun.change(df.main, "gas_total_tax")
+#df.main <- fun.change(df.main, "gas_excise_tax")
+#df.main <- fun.change(df.main, "diesel_total_tax")
+#df.main <- fun.change(df.main, "diesel_excise_tax") 
+#df.main <- fun.change(df.main, "gasohol_total_tax")
+#df.main <- fun.change(df.main, "gasohol_excise_tax") 
+
+df.main <- fun.change(df.main, "sgastax") 
+df.main <- fun.change(df.main, "fgastax") 
+
+df.main <- fun.change(df.main, "diesel_tax")
+df.main <- fun.change(df.main, "gas_tax")
+#df.main <- fun.change(df.main, "gas_tax.log")
+
+df.main <- fun.change(df.main, "employment.total")
+df.main <- fun.change(df.main, "income.percap")
+
+
+
+df.main <- fun.change(df.main, "vote.inc")
+df.main <- fun.change(df.main, "vote.noninc")
+
+df.main <- fun.change(df.main, "vote.inc.prop")
+df.main <- fun.change(df.main, "vote.noninc.prop")
+
+df.main <- fun.change(df.main, "vote.pro.gov.prop")
+
+df.main <- fun.change(df.main, "vote.pro.maj.party")
+df.main <- fun.change(df.main, "vote.pro.maj.party.prop")
+
+df.main <- fun.change(df.main, "vote.pro.inc.party")
+df.main <- fun.change(df.main, "vote.pro.inc.party.prop")
+
+#df.main <- fun.change(df.main, "vote.pro.inc.party.prop.most.recent")
+
+
+df.main <- fun.change(df.main, "sd.bridge.area.prop")
+df.main <- fun.change(df.main, "sd.bridge.count.prop")
+
+df.main <- fun.change(df.main, "def.bridge.area.prop")
+df.main <- fun.change(df.main, "def.bridge.count.prop")
+
+df.main <- fun.change(df.main, "fo.bridge.area.prop")
+df.main <- fun.change(df.main, "fo.bridge.count.prop")
+
+
+
+
+
+
+#lag the change variables
+
+
+#df <- df.main[,c("state", "ddez", "year")]  #ensures that the ID columns are the first three in the DF.
+#df.main <- left_join(df, df.main)
+
+num_of_id_cols <- 3
+
+
+df.for.lagging <- df.main[ , append(1:num_of_id_cols, which(grepl( "\\dy$" , names( df.main ) ))) ] #subsets the first three columns (which are the ID columns) and all columns with names ending with a diget + "y" (which are the change variables calculated above).
+
+ 
+
+lag <- 1  
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + lag
+a <- colnames(df)
+b <- length(a)
+colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+df.main <- left_join(df.main, df)
+
+lag <- 2 
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + lag
+a <- colnames(df)
+b <- length(a)
+colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+df.main <- left_join(df.main, df)
+
+lag <- 3
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + lag
+a <- colnames(df)
+b <- length(a)
+colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+df.main <- left_join(df.main, df)
+
+lag <- 4 
+df <- df.for.lagging
+df$year <- as.numeric(df$year)
+df$year <- df$year + lag
+a <- colnames(df)
+b <- length(a)
+colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+df.main <- left_join(df.main, df)
+
+
+
+
+if (FALSE) {
+
+    lag <- 5 
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+    lag <- 6 
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+    lag <- 7
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+    lag <- 8
+    df <- df.for.lagging
+    df$year <- as.numeric(df$year)
+    df$year <- df$year + lag
+    a <- colnames(df)
+    b <- length(a)
+    colnames(df)[sum(num_of_id_cols, 1):b] <- paste0(colnames(df)[sum(num_of_id_cols, 1):b], paste0(".tm", lag))
+    df.main <- left_join(df.main, df)
+
+}
+
+
+
+
+
+
+
+#exploring variables and exporting file----
+if (FALSE) {
+    plyr::count(df.main$gasohol_total_tax_change_count) #for exploring variables.
+
+}
+
+
+
+#add a unique id variable for each district.
+if (TRUE) {
+
+    df.main$dist.id <- paste0(df.main$state, "_", df.main$ddez)
+
+    #which(is.na(df.main$dist.id))
+
+
+}
+
+#change of vote.pro.inc.party.prop since last election.
+if (TRUE) {
+    df.main$vote.pro.inc.party.prop.change  <- df.main$vote.pro.inc.party.prop - df.main$vote.pro.inc.party.prop.most.recent.tm1
+}
+
+
+
+
+
+
+#adds a prefix to all variables containing the string "bridge"
+if (FALSE) {  
+
+    df.main <- df.main %>% rename_at(vars(contains('bridge')), ~ paste("all", ., sep = "_"))  #adds a prefix to all variables containing the string "bridge"
+}
+
+
+#export files-----
+if (FALSE) {
+
+    #save(df.main, file = "dfmain_districts.Rdata")
+    #write_excel_csv(df.main, "dfmain_districts.csv")
+
+
+    #fwrite(df.main, file = "dfmain_districts.csv")
+    #fwrite(df.main, file = "dfmain_districts.csv.gz", compress = "gzip")
+    #dt = fread("dfmain_districts.csv.gz") 
+
+    var.names <- as.data.frame(colnames(df.main))
+    fwrite(var.names, file = paste0(path.data.out, "variable_names.csv"))
+    #fwrite(var.names, file = "F:/Data/Data exports/variable_names.csv")
+
+
+    fwrite(df.main, file = paste0(path.data.out, "dfmain_districts.csv")) #11 secs#
+    #fwrite(df.main, file = "F:/Data/Data exports/dfmain_districts.csv") #5.628218 secs#
+    fwrite(df.main, file = paste0(path.data.out, "dfmain_districts.csv.gz"), compress = "gzip") ##17secs
+    #fwrite(df.main, file = "F:/Data/Data exports/dfmain_districts.csv.gz", compress = "gzip") ##8.42098 secs
+    #save(df.main, file = "E:/Data/GRA transport data exports/dfmain_districts.Rdata") #41.9193 secs
+    save(df.main, file = paste0(path.data.out, "dfmain_districts.Rdata")) #1.16mins
+
+    #df.main <- fread("E:/Data/GRA transport data exports/dfmain_districts.csv") #5.178633 secs
+    #df.main <- fread("E:/Data/GRA transport data exports/dfmain_districts.csv.gz") #12.58458 secs
+    #load("E:/Data/GRA transport data exports/dfmain_districts.Rdata") #12.42486 secs
+    
+
+}
+
+
+
+
+
+
+#start.time <- Sys.time()
+
+#run time ----
+end.time <- Sys.time()
+total.time.elapsed <- end.time - start.time
+total.time.elapsed
